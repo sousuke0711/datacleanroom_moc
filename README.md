@@ -25,14 +25,39 @@ Apache Flink ──── AnonymizationFunction
 
 ## 技術スタック
 
-| コンポーネント | バージョン | 役割 |
+| コンポーネント | バージョン | 役割 | 実行環境 |
+|---|---|---|---|
+| Apache Flink | 1.17.2 | ストリーム処理エンジン | Docker（カスタムビルド） |
+| Apache Pulsar | 3.1.0 | メッセージブローカー | Docker |
+| OpenMetadata | 1.3.0 | メタデータ管理・PIIタグ付け | Docker |
+| Apache Iceberg | 1.4.2 | オープンテーブルフォーマット | Docker（Flink内ライブラリ） |
+| Project Nessie | 0.74.0 | Iceberg REST カタログ | Docker |
+| MinIO | latest | S3互換オブジェクトストレージ | Docker |
+
+## コンポーネント実行環境
+
+### Docker管理（`docker compose up -d` で一括起動）
+
+| サービス名 | イメージ | 備考 |
 |---|---|---|
-| Apache Flink | 1.17.2 | ストリーム処理エンジン |
-| Apache Pulsar | 3.1.0 | メッセージブローカー |
-| OpenMetadata | 1.3.0 | メタデータ管理・PIIタグ付け |
-| Apache Iceberg | 1.4.2 | オープンテーブルフォーマット |
-| Project Nessie | 0.74.0 | Iceberg REST カタログ |
-| MinIO | latest | S3互換オブジェクトストレージ |
+| `flink-jobmanager` | `flink-job/Dockerfile`（カスタムビルド） | PyFlink + コネクタJAR 同梱 |
+| `flink-taskmanager` | 同上 | JobManager と同一イメージ |
+| `pulsar` | `apachepulsar/pulsar:3.1.0` | スタンドアロンモード |
+| `openmetadata` | `openmetadata/server:1.3.0` | 認証なし（MoC用） |
+| `om_mysql` | `mysql:8.0` | OpenMetadata のメタデータDB |
+| `om_elasticsearch` | `elasticsearch:8.10.2` | OpenMetadata の検索バックエンド |
+| `minio` | `minio/minio:latest` | Iceberg データ / Flink チェックポイント用 |
+| `minio_init` | `minio/mc:latest` | 初回バケット作成のみ（使い捨てコンテナ） |
+| `nessie` | `ghcr.io/projectnessie/nessie:0.74.0` | Iceberg REST カタログ |
+
+### ローカル実行（Python / bash スクリプト）
+
+| スクリプト | 実行タイミング | 説明 |
+|---|---|---|
+| `scripts/setup_openmetadata.py` | サービス起動後（1回） | PIIタグ・スキーマの初期登録 |
+| `scripts/submit_job.sh` | セットアップ後 | Flink ジョブの投入 |
+| `scripts/produce_sample_data.py` | ジョブ投入後 | サンプルデータの継続送信 |
+| `scripts/verify_output.py` | 任意のタイミング | 匿名化済みデータの確認 |
 
 ## 匿名化手法
 
@@ -52,7 +77,7 @@ Apache Flink ──── AnonymizationFunction
 
 ## クイックスタート
 
-### 1. サービス起動
+### 1. サービス起動　`[Docker]`
 
 ```bash
 docker compose up -d
@@ -60,7 +85,7 @@ docker compose up -d
 
 初回は Flink イメージのビルドと JAR ダウンロードに数分かかります。
 
-### 2. OpenMetadata にスキーマ・PIIタグを登録
+### 2. OpenMetadata にスキーマ・PIIタグを登録　`[ローカル実行]`
 
 OpenMetadata の起動完了（約3分）を待ってから実行します。
 
@@ -72,13 +97,13 @@ python scripts/setup_openmetadata.py
 - PII 分類 (`PII.Mask` / `PII.Tokenize` / `PII.Pseudonymize`)
 - テーブル `sample_data.default.default.users` とカラムのPIIタグ
 
-### 3. Flink ジョブを投入
+### 3. Flink ジョブを投入　`[ローカル実行]`
 
 ```bash
 bash scripts/submit_job.sh
 ```
 
-### 4. サンプルデータを送信
+### 4. サンプルデータを送信　`[ローカル実行]`
 
 ```bash
 python scripts/produce_sample_data.py
@@ -86,13 +111,13 @@ python scripts/produce_sample_data.py
 
 2秒ごとにランダムなユーザーデータを `raw-user-data` トピックに送信します。
 
-### 5. 匿名化済みデータを確認
+### 5. 匿名化済みデータを確認　`[ローカル実行]`
 
 ```bash
 python scripts/verify_output.py
 ```
 
-### 6. (オプション) Iceberg に永続化
+### 6. (オプション) Iceberg に永続化　`[Docker内 Flink コンテナで実行]`
 
 ```bash
 docker compose exec flink-jobmanager \
